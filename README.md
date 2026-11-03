@@ -4,6 +4,11 @@ This fork also provides a [selected-client reporter](CLIENT_REPORTER.md): a
 separate, unprivileged virtual-switch mode that reports configured clients after
 ping and MAC verification. The original gateway features remain available.
 
+The [native OpenWrt telemetry deployment](OPENWRT_TELEMETRY.md) adds real DHCP/IP
+mappings, routed per-client traffic, WAN/LAN counters and router CPU/memory data.
+Its publishers run unprivileged in read-only filesystem jails and never apply
+controller provisioning to the router.
+
 A Python 3 daemon that emulates a Ubiquiti UniFi Gateway (UGW3) to a UniFi Controller. This allows non-Ubiquiti routers (OpenWRT, OPNSense, pfSense, or any Linux/FreeBSD router) to appear in the UniFi Controller UI and report network statistics.
 
 ## How It Works

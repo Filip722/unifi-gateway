@@ -1,0 +1,104 @@
+# Read-only OpenWrt telemetry
+
+The native OpenWrt deployment runs three independent procd instances under
+`unifi-telemetry`: a local collector, a virtual gateway publisher, and the
+selected-client virtual switch. UniFi Network itself stays on its existing host.
+The original upstream gateway entry point and other features remain available.
+
+## Data published
+
+* DHCP MAC/IP/name mappings from current leases.
+* Primary-LAN hosts that answer ping and match the neighbor-table MAC.
+* Per-host routed traffic bytes and packets from the existing `nlbwmon` database.
+* WAN/LAN interface totals and rates from kernel counters.
+* Router CPU usage, memory use and actual router uptime.
+* A real Internet ICMP check and latency to `1.1.1.1` in the local status file.
+
+The gateway publishes the IP mappings while native UniFi switches and APs retain
+their client attachment information. The virtual switch still reports only its
+explicit target list. It gives clients missed by the real switches an independent
+status source; it does not become the parent of every client.
+
+UniFi requires the legacy gateway host-report capability and host observation
+uptime to merge this data. `UGW3` and the reported firmware version are protocol
+compatibility metadata. The device should be named clearly, for example
+`OpenWrt (telemetry only)`, with auto-upgrade disabled for this emulated device.
+
+Traffic statistics cover connections accounted for by OpenWrt. Traffic staying on
+a switch or inside a hypervisor bridge is outside that path. UniFi accumulates
+new observations; existing historical monthly data is not backfilled into UniFi's
+history. The full accounting-period data remains available in OpenWrt/LuCI.
+Counter decreases at an accounting reset are handled without negative rates or
+unsigned-counter spikes. No application-level DPI or physical switch-port
+statistics are invented. Internet health in the local status file must not be
+confused with a complete native UniFi gateway health history.
+
+## Native deployment
+
+Use OpenWrt's official `python3`, `python3-psutil`, and `python3-cryptography`
+packages. The Inform codec supports both upstream PyCryptodome and the official
+OpenWrt cryptography backend, with cross-backend CBC/GCM tests.
+
+1. Install `client_reporter.py`, `router_telemetry.py`, `openwrt_snapshot.py`,
+   `unifi_protocol.py`, `tools.py` and `tlv.py` under `/usr/lib/unifi-reporter/`,
+   owned by root and writable only by root.
+2. Create a locked account/group named `unifi-report`. Install the collector
+   configuration from `conf/openwrt-snapshot.sample.json` at
+   `/etc/unifi-telemetry-snapshot.json`. Match case-sensitive interface names.
+3. Install private deployment configurations at `/etc/unifi-reporters/clients.json`
+   and `/etc/unifi-reporters/gateway.json`, based on the sample files. Both use
+   `/tmp/unifi-telemetry/snapshot.json`; use the real LAN MAC for gateway identity
+   and a dedicated synthetic MAC for the selected-client switch. Configure the
+   actual Network Inform URL. Do not publish deployment configs or adoption keys.
+4. Create `/etc/unifi-reporters/state/clients` and `state/gateway`, mode 0700,
+   owned by `unifi-report`. Transfer existing per-device adoption state securely
+   when migrating; stop old publishers before starting the same identities here.
+5. Install `pkg/openwrt/unifi-telemetry.init` as executable
+   `/etc/init.d/unifi-telemetry`. It requires `ujail`; a publisher fails closed if
+   its jail cannot be created. Start it and adopt only the new emulated devices.
+   Enable at boot after checking fresh reports in UniFi.
+
+The collector updates a RAM snapshot every approximately 30 seconds. Publishers
+report every 30 seconds; probes and controller requests add a small delay.
+Adoption metadata is persistent and written only when it changes. Frequently
+updated snapshots and status files stay in RAM, avoiding repeated flash writes.
+
+## Isolation and failure behavior
+
+The root collector accepts no controller messages, opens no listener, and executes
+only fixed read-only data queries and IP-address-validated ICMP probes. It cannot
+be instructed through a report to apply UCI, routing, DHCP or firewall changes.
+
+Both publishers run as the locked user with `no_new_privs` in read-only filesystem
+jails. Router configuration and the ubus socket are absent. Only each publisher's
+own adoption state and RAM status directory are writable. Effective capabilities
+are zero. There are no router SSH keys or UniFi administrative API keys.
+
+Unknown controller commands and incompatible responses stop the affected
+publisher. Publishers are deliberately not automatically respawned after failure.
+The collector is independent and continues its probes. Stale or invalid snapshots
+are not reported. WAN address loss does not remove LAN observations.
+
+If UniFi breaks gateway reporting, extra IP/traffic/system information can stop
+updating. Real routing and DHCP continue. Native UniFi device reports and the
+separate selected-client publisher continue independently. No software promises
+vendor UI compatibility across future releases.
+
+## Operations
+
+```
+/etc/init.d/unifi-telemetry status
+cat /tmp/unifi-reporters/clients/status.json
+cat /tmp/unifi-reporters/gateway/status.json
+logread -e python3
+```
+
+To restart all custom reporting: `/etc/init.d/unifi-telemetry restart`.
+To disable it: `/etc/init.d/unifi-telemetry disable` followed by
+`/etc/init.d/unifi-telemetry stop`. These actions do not restart network, firewall,
+dnsmasq, UniFi APs or switches. Remove/forget emulated devices in UniFi only after
+stopping their publishers.
+
+For a normal sysupgrade, preserve `/etc/unifi-reporters/` and the collector config
+securely, reinstall the code/dependencies/init script, then verify reporting.
+Adoption state contains device-specific secrets and belongs in a private backup.

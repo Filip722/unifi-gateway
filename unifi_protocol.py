@@ -2,7 +2,7 @@
 import time
 import json
 import ast
-from Crypto import Random
+import os
 
 import logging
 import zlib
@@ -14,7 +14,11 @@ except ImportError:
 
 logger = logging.getLogger('unifi-gateway')
 
-from Crypto.Cipher import AES
+try:
+    from Crypto.Cipher import AES
+except ImportError:
+    AES = None
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from struct import pack, unpack
 from binascii import a2b_hex
 
@@ -27,8 +31,33 @@ from tools import (
 MASTER_KEY = "ba86f2bbe107c7c57eb5f2690775c712"
 
 
+def _cbc(key, iv, data, decrypt=False):
+    if AES is not None:
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        return cipher.decrypt(data) if decrypt else cipher.encrypt(data)
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+    context = cipher.decryptor() if decrypt else cipher.encryptor()
+    return context.update(data) + context.finalize()
+
+
+def _gcm(key, iv, data, header, decrypt=False):
+    if AES is not None:
+        cipher = AES.new(key, AES.MODE_GCM, iv)
+        cipher.update(header)
+        if decrypt:
+            return cipher.decrypt_and_verify(data[:-16], data[-16:])
+        encrypted, tag = cipher.encrypt_and_digest(data)
+        return encrypted + tag
+    mode = modes.GCM(iv, data[-16:]) if decrypt else modes.GCM(iv)
+    cipher = Cipher(algorithms.AES(key), mode)
+    context = cipher.decryptor() if decrypt else cipher.encryptor()
+    context.authenticate_additional_data(header)
+    result = context.update(data[:-16] if decrypt else data) + context.finalize()
+    return result if decrypt else result + context.tag
+
+
 def encode_inform(config, data, encryption='CBC'):
-    iv = Random.new().read(16)
+    iv = os.urandom(16)
     key = MASTER_KEY
 
     if config.getboolean('gateway', 'is_adopted'):
@@ -61,14 +90,11 @@ def encode_inform(config, data, encryption='CBC'):
 
     if encryption == 'GCM':
         encoded_data += pack('>I', len(payload) + 16)
-        _aes = AES.new(a2b_hex(key), AES.MODE_GCM, iv)
-        _aes.update(encoded_data)
-        payload, tag = _aes.encrypt_and_digest(payload)
-        payload += tag
+        payload = _gcm(a2b_hex(key), iv, payload, encoded_data)
     elif encryption == 'CBC':
-        pad_len = AES.block_size - (len(payload) % AES.block_size)
+        pad_len = 16 - (len(payload) % 16)
         payload += bytes([pad_len]) * pad_len
-        payload = AES.new(a2b_hex(key), AES.MODE_CBC, iv).encrypt(payload)
+        payload = _cbc(a2b_hex(key), iv, payload)
         encoded_data += pack('>I', len(payload))
 
     encoded_data += payload
@@ -99,15 +125,11 @@ def decode_inform(config, encoded_data):
 
     if flag['encrypted']:
         if flag['encryptedGCM']:
-            tag = payload[-16:]
-            payload = payload[:-16]
-            _aes = AES.new(a2b_hex(key), AES.MODE_GCM, iv)
-            _aes.update(header)
-            payload = _aes.decrypt_and_verify(payload, tag)
+            payload = _gcm(a2b_hex(key), iv, payload, header, decrypt=True)
         else:
-            payload = AES.new(a2b_hex(key), AES.MODE_CBC, iv).decrypt(payload)
+            payload = _cbc(a2b_hex(key), iv, payload, decrypt=True)
             pad_size = payload[-1]
-            if pad_size > AES.block_size:
+            if pad_size > 16:
                 raise Exception('Response not padded or padding is corrupt')
             payload = payload[:(len(payload) - pad_size)]
 

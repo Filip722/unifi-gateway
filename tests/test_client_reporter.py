@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -14,6 +15,7 @@ from client_reporter import (
     codec_config,
     load_config,
     main,
+    observe_clients,
     payload,
     probe,
 )
@@ -136,3 +138,22 @@ def test_real_process_stops_on_incompatible_controller(config, tmp_path, reply):
         server.shutdown()
         thread.join()
         server.server_close()
+
+
+def test_snapshot_mode_still_requires_explicit_ip_and_mac_match(config, tmp_path):
+    snapshot = tmp_path / 'snapshot.json'
+    config['snapshot_file'] = str(snapshot)
+    target = config['targets'][0]
+    data = {'schema_version': 1, 'collected_at': int(time.time()),
+            'live_hosts': [{'ip': target['ip'], 'mac': 'aa:bb:cc:dd:ee:ff'}]}
+    snapshot.write_text(json.dumps(data))
+    _, status = observe_clients(config, {}, time.monotonic())
+    assert status['online'] == []
+    data['live_hosts'][0]['mac'] = target['mac']
+    snapshot.write_text(json.dumps(data))
+    _, status = observe_clients(config, {}, time.monotonic())
+    assert status['online'] == [target['mac']]
+    data['collected_at'] -= 120
+    snapshot.write_text(json.dumps(data))
+    with pytest.raises(ValueError):
+        observe_clients(config, {}, time.monotonic())

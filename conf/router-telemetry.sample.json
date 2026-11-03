@@ -1,0 +1,6 @@
+{
+  "name": "OpenWrt (telemetry only)",
+  "controller_url": "http://127.0.0.1:8080/inform",
+  "mac": "00:11:22:33:44:55",
+  "snapshot_file": "/tmp/unifi-telemetry/snapshot.json"
+}

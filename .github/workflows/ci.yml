@@ -26,7 +26,7 @@ jobs:
         run: ruff check --select E4,E7,E9,F --exclude poc/ --exclude controller/ --exclude tests/ --ignore E401,E402 .
 
       - name: Reporter test lint
-        run: ruff check --select E4,E7,E9,F tests/test_client_reporter.py
+        run: ruff check --select E4,E7,E9,F tests/test_client_reporter.py tests/test_router_telemetry.py tests/test_crypto_backends.py
 
   smoke-test:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest
+        run: pip install -r requirements.txt pytest cryptography
 
       - name: Tests
         run: pytest -q

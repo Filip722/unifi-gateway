@@ -1,5 +1,9 @@
 # Selected client reporting
 
+For the native router installation, see [OpenWrt telemetry](OPENWRT_TELEMETRY.md).
+That deployment reads a fresh local verified snapshot and keeps status files in
+RAM; the systemd/SSH deployment below is an optional alternative.
+
 This fork retains the upstream gateway emulator and adds `client_reporter.py`,
 a separate reporting-only virtual switch for wired clients that existing UniFi
 hardware fails to report. It is unofficial and needs compatibility validation

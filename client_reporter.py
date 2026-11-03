@@ -140,8 +140,26 @@ def save_json(path, data):
     tmp.replace(path)
 
 
-def run(config, state_dir):
+def observe_clients(config, state, started):
+    if config.get('snapshot_file'):
+        snapshot = json.loads(Path(config['snapshot_file']).read_text())
+        if snapshot.get('schema_version') != 1:
+            raise CompatibilityError('Unsupported snapshot schema')
+        if not -5 <= time.time() - snapshot['collected_at'] <= 60:
+            raise ValueError('Snapshot is not fresh')
+        live = {(h['mac'], h['ip']) for h in snapshot['live_hosts']}
+        online = {t['mac'] for t in config['targets'] if (t['mac'], t['ip']) in live}
+    else:
+        online = {t['mac'] for t in config['targets'] if probe(t, config['interface'])}
+    body = payload(config, online, state.get('adopted', False),
+                   state.get('cfgversion', ''), started)
+    return body, {'online': sorted(online)}
+
+
+def run(config, state_dir, observe=observe_clients, status_dir=None):
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    status_dir = status_dir or state_dir
+    status_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     state_path = state_dir / 'adoption.json'
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     started = time.monotonic()
@@ -152,10 +170,8 @@ def run(config, state_dir):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     while True:
         try:
-            online = {t['mac'] for t in config['targets'] if probe(t, config['interface'])}
+            body, observation = observe(config, state, started)
             codec = codec_config(config, state)
-            body = payload(config, online, state.get('adopted', False),
-                           state.get('cfgversion', ''), started)
             request = urllib.request.Request(
                 config['controller_url'], data=encode_inform(codec, json.dumps(body)),
                 headers={'Content-Type': 'application/x-binary'}, method='POST',
@@ -172,12 +188,11 @@ def run(config, state_dir):
             if new_state != state:
                 save_json(state_path, new_state)
                 state = new_state
-            save_json(state_dir / 'status.json', {
-                'checked_at': int(time.time()), 'online': sorted(online),
+            save_json(status_dir / 'status.json', {
+                'checked_at': int(time.time()), **observation,
                 'adopted': state.get('adopted', False),
             })
-            LOG.info('Reported %d/%d verified clients; adopted=%s',
-                     len(online), len(config['targets']), state.get('adopted', False))
+            LOG.info('Report accepted; adopted=%s', state.get('adopted', False))
         except CompatibilityError:
             raise
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -190,11 +205,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
     parser.add_argument('--state-dir', default='/var/lib/unifi-client-reporter')
+    parser.add_argument('--status-dir')
     args = parser.parse_args()
     os.umask(0o077)
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     try:
-        run(load_config(args.config), Path(args.state_dir))
+        run(load_config(args.config), Path(args.state_dir),
+            status_dir=Path(args.status_dir) if args.status_dir else None)
     except CompatibilityError as exc:
         LOG.error('Reporter stopped; network configuration is unaffected: %s', exc)
         return 78
