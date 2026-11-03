@@ -89,3 +89,9 @@ def test_incompatible_controller_has_nonrestarting_exit_status(config):
             patch('client_reporter.load_config', return_value=config), \
             patch('client_reporter.run', side_effect=CompatibilityError('new format')):
         assert main() == 78
+
+
+@pytest.mark.parametrize('response', [None, [], {'_type': 'setparam', 'mgmt_cfg': []}])
+def test_changed_controller_schema_stops_cleanly(response):
+    with pytest.raises(CompatibilityError):
+        apply_response(response, {})

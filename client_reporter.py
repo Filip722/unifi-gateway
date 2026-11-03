@@ -93,11 +93,15 @@ def payload(config, online, adopted, cfgversion='', started=None):
 
 
 def apply_response(response, state):
+    if not isinstance(response, dict):
+        raise CompatibilityError('Unexpected controller response structure')
     kind = response.get('_type')
     if kind == 'noop':
         return dict(state)
     if kind != 'setparam':
         raise CompatibilityError(f'Unsupported controller response type: {kind}')
+    if not isinstance(response.get('mgmt_cfg', ''), str):
+        raise CompatibilityError('Unexpected adoption metadata structure')
     new = dict(state)
     # Only adoption/encryption metadata is accepted. system_cfg and every
     # provisioning or executable field are deliberately never applied.
