@@ -100,7 +100,7 @@ class TestHostTableMerge:
         assert result[0]['authorized'] is True
         assert result[0]['rx_bytes'] == 0
 
-    def test_dhcp_adds_missing_hosts(self, gateway_config, base_patches):
+    def test_dhcp_does_not_make_unobserved_hosts_online(self, gateway_config, base_patches):
         dc = create_base(gateway_config)
         dc.data['dhcp_leases'] = [
             {'mac': 'aa:bb:cc:00:00:02', 'ip': '192.168.1.20', 'hostname': 'printer'},
@@ -108,9 +108,18 @@ class TestHostTableMerge:
         arp = [{'mac': 'aa:bb:cc:00:00:01', 'ip': '192.168.1.10'}]
         with patch('time.time', return_value=2000000.0):
             result = dc._merge_dhcp_into_hosts(arp)
-        assert len(result) == 2
-        hostnames = {h.get('hostname') for h in result}
-        assert 'printer' in hostnames
+        assert len(result) == 1
+        assert result[0]['mac'] == arp[0]['mac']
+
+    def test_old_lease_does_not_name_a_reassigned_address(self, gateway_config, base_patches):
+        dc = create_base(gateway_config)
+        dc.data['dhcp_leases'] = [
+            {'mac': 'aa:bb:cc:00:00:01', 'ip': '192.168.1.20', 'hostname': 'old'},
+        ]
+        result = dc._merge_dhcp_into_hosts([
+            {'mac': 'aa:bb:cc:00:00:01', 'ip': '192.168.1.10'},
+        ])
+        assert 'hostname' not in result[0]
 
     def test_dhcp_enriches_hostname(self, gateway_config, base_patches):
         dc = create_base(gateway_config)

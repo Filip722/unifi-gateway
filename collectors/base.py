@@ -337,24 +337,9 @@ class BaseCollector:
 
         for lease in self.data.get('dhcp_leases', []):
             mac = lease['mac'].lower()
-            if mac not in hosts_by_mac:
-                enriched = {
-                    'mac': lease['mac'],
-                    'ip': lease['ip'],
-                    'authorized': True,
-                    'age': 0,
-                    'uptime': 0,
-                    'rx_bytes': 0,
-                    'tx_bytes': 0,
-                    'rx_packets': 0,
-                    'tx_packets': 0,
-                    'bc_bytes': 0,
-                    'mc_bytes': 0,
-                }
-                if 'hostname' in lease:
-                    enriched['hostname'] = lease['hostname']
-                hosts_by_mac[mac] = enriched
-            elif 'hostname' not in hosts_by_mac[mac] and 'hostname' in lease:
+            # A lease supplies metadata, not evidence that a host is online.
+            if (mac in hosts_by_mac and hosts_by_mac[mac]['ip'] == lease['ip']
+                    and 'hostname' not in hosts_by_mac[mac] and 'hostname' in lease):
                 hosts_by_mac[mac]['hostname'] = lease['hostname']
 
         return list(hosts_by_mac.values())

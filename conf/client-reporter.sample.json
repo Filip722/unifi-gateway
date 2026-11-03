@@ -1,0 +1,10 @@
+{
+  "name": "Verified client reporter (virtual)",
+  "controller_url": "http://127.0.0.1:8080/inform",
+  "mac": "02:00:00:00:fe:01",
+  "ip": "192.0.2.1",
+  "interface": "eth0",
+  "targets": [
+    {"name": "Example wired device", "ip": "192.0.2.10", "mac": "00:11:22:33:44:55"}
+  ]
+}

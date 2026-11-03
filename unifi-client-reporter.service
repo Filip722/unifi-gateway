@@ -1,0 +1,38 @@
+[Unit]
+Description=Report selected reachable clients to UniFi (virtual switch)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=unifi-client-reporter
+Group=unifi-client-reporter
+WorkingDirectory=/opt/unifi-client-reporter
+ExecStart=/opt/unifi-client-reporter/venv/bin/python client_reporter.py --config /etc/unifi-client-reporter.json
+StateDirectory=unifi-client-reporter
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=30
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=128M
+CPUQuota=10%
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

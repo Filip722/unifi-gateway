@@ -1,5 +1,9 @@
 # UniFi Gateway Emulator  [![Build & Release](https://github.com/amd989/unifi-gateway/actions/workflows/release.yml/badge.svg)](https://github.com/amd989/unifi-gateway/actions/workflows/release.yml)
 
+This fork also provides a [selected-client reporter](CLIENT_REPORTER.md): a
+separate, unprivileged virtual-switch mode that reports configured clients after
+ping and MAC verification. The original gateway features remain available.
+
 A Python 3 daemon that emulates a Ubiquiti UniFi Gateway (UGW3) to a UniFi Controller. This allows non-Ubiquiti routers (OpenWRT, OPNSense, pfSense, or any Linux/FreeBSD router) to appear in the UniFi Controller UI and report network statistics.
 
 ## How It Works
