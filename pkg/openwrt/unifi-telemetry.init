@@ -19,6 +19,7 @@ start_service() {
     procd_close_instance
 
     for profile in clients gateway; do
+        [ -f "/etc/unifi-reporters/$profile.json" ] || continue
         case "$profile" in
             clients) entry=client_reporter.py ;;
             gateway) entry=router_telemetry.py ;;

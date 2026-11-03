@@ -94,6 +94,10 @@ logread -e python3
 ```
 
 To restart all custom reporting: `/etc/init.d/unifi-telemetry restart`.
+Each publisher starts only when its matching `/etc/unifi-reporters/clients.json`
+or `gateway.json` exists. Rename a configuration to `.json.disabled` to retire that
+publisher across restarts. If the gateway alone covers the selected clients, the
+virtual switch can be retired this way and forgotten in UniFi.
 To disable it: `/etc/init.d/unifi-telemetry disable` followed by
 `/etc/init.d/unifi-telemetry stop`. These actions do not restart network, firewall,
 dnsmasq, UniFi APs or switches. Remove/forget emulated devices in UniFi only after
