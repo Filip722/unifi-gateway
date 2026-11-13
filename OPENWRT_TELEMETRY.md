@@ -122,6 +122,8 @@ are not backfilled into the timeline.
    * The `uplot/` directory → `/www/luci-static/resources/statistics/uplot/`
    * `luci-device-traffic.json` → `/usr/share/luci/menu.d/luci-device-traffic.json`
    * `luci-device-traffic-acl.json` → `/usr/share/rpcd/acl.d/luci-device-traffic.json`
+   Run `/etc/init.d/rpcd reload` after installing the ACL file so existing LuCI
+   sessions receive the new read permission. Otherwise the Devices page returns 403.
 4. Enable `luci_statistics.collectd_exec` and add this UCI section to
    `/etc/config/luci_statistics`:
 
