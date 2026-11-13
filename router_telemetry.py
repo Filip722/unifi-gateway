@@ -1,6 +1,5 @@
 """Publish read-only OpenWrt observations using the safe Inform transport."""
 import argparse
-import copy
 import ipaddress
 import json
 import logging
@@ -9,7 +8,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from client_reporter import CompatibilityError, MAC, run
+from client_reporter import CompatibilityError, MAC, run, save_json
 
 
 def read_snapshot(config):
@@ -65,8 +64,9 @@ def gateway_payload(config, snapshot, state, previous=None):
         entry.update({'age': 0, 'authorized': True, 'uptime': host.get('observed_for', 0)})
         usage = snapshot['usage'].get(host['mac'], {})
         if usage:
-            entry.update({k: usage[k] for k in ['rx_bytes', 'tx_bytes']})
-            entry.update(rx_packets=usage['rx_pkts'], tx_packets=usage['tx_pkts'])
+            # UniFi counts from the gateway side; nlbwmon uses the client side.
+            entry.update(rx_bytes=usage['tx_bytes'], tx_bytes=usage['rx_bytes'])
+            entry.update(rx_packets=usage['tx_pkts'], tx_packets=usage['rx_pkts'])
         hosts.append(entry)
 
     memory = snapshot['memory']
@@ -83,11 +83,18 @@ def gateway_payload(config, snapshot, state, previous=None):
     interfaces, networks, routes = [], [], []
     for interface in snapshot['interfaces']:
         name = 'eth0' if interface['role'] == 'wan' else 'eth1'
+        if interface['role'] == 'lan' and interface is not lan:
+            # Preserve the actual VLAN suffix on the emulated LAN port.
+            suffix = interface['device'].rpartition('.')[2]
+            name = 'eth1.' + suffix if suffix.isdigit() else interface['device']
         address = interface['addresses'][0] if interface['addresses'] else None
         counters = dict(interface['counters'])
         if elapsed > 0:
-            old = next(i for i in previous['interfaces'] if i['role'] == interface['role'])
+            old = next((i for i in previous['interfaces']
+                        if i['device'] == interface['device']), None)
             for direction in ['rx', 'tx']:
+                if old is None:
+                    continue
                 delta = counters[direction + '_bytes'] - old['counters'][direction + '_bytes']
                 if delta >= 0:
                     counters[direction + '_bps'] = int(delta / elapsed)
@@ -103,7 +110,10 @@ def gateway_payload(config, snapshot, state, previous=None):
             network['address'] = address['address'] + '/' + str(address['mask'])
             network['addresses'] = [network['address']]
         if interface['role'] == 'lan':
-            network['host_table'] = hosts
+            subnets = [ipaddress.ip_network(a['address'] + '/' + str(a['mask']), strict=False)
+                       for a in interface['addresses']]
+            network['host_table'] = [h for h in hosts if any(
+                ipaddress.ip_address(h['ip']) in subnet for subnet in subnets)]
         else:
             gateways = [r['nexthop'] for r in interface['routes']
                         if r.get('target') == '0.0.0.0' and r.get('mask') == 0]
@@ -131,25 +141,46 @@ def gateway_payload(config, snapshot, state, previous=None):
 
 
 class RouterObserver:
-    def __init__(self):
+    def __init__(self, checkpoint=None):
         self.previous = None
         self.first_seen = {}
         self.raw_usage = {}
         self.total_usage = {}
+        self.checkpoint = checkpoint
+        self.restored = False
 
     def __call__(self, config, state, started):
         snapshot = read_snapshot(config)
+        if not self.restored:
+            if self.checkpoint and self.checkpoint.exists():
+                saved = json.loads(self.checkpoint.read_text())
+                if saved['boot_id'] == snapshot['boot_id']:
+                    self.raw_usage = saved['raw_usage']
+                    self.total_usage = saved['total_usage']
+            self.restored = True
         # nlbwmon starts a new database each accounting period. Keep Inform
         # counters monotonic across that reset, using only observed increments.
-        for mac, raw in snapshot['usage'].items():
-            if mac not in self.raw_usage:
-                self.total_usage[mac] = dict(raw)
-            else:
-                for key, value in raw.items():
-                    delta = value - self.raw_usage[mac][key]
-                    self.total_usage[mac][key] += delta if delta >= 0 else value
-        self.raw_usage = copy.deepcopy(snapshot['usage'])
-        snapshot['usage'] = {mac: dict(self.total_usage[mac]) for mac in snapshot['usage']}
+        streams = [('internet/' + mac, mac, raw)
+                   for mac, raw in snapshot['usage'].items()]
+        streams += [('local/' + h['mac'] + '/' + h['ip'], h['mac'], {
+            k: h[k] for k in ['rx_bytes', 'tx_bytes', 'rx_pkts', 'tx_pkts']})
+            for h in snapshot.get('local_usage', [])]
+        current = {}
+        for source, mac, raw in streams:
+            total = self.total_usage.setdefault(mac, dict.fromkeys(
+                ['rx_bytes', 'tx_bytes', 'rx_pkts', 'tx_pkts'], 0))
+            # A new source, including a reassigned IP, establishes its baseline.
+            if source in self.raw_usage:
+                for key in total:
+                    value = raw[key]
+                    delta = value - self.raw_usage[source][key]
+                    total[key] += delta if delta >= 0 else value
+            current[source] = dict(raw)
+        self.raw_usage = current
+        snapshot['usage'] = {mac: dict(self.total_usage[mac]) for _, mac, _ in streams}
+        if self.checkpoint:
+            save_json(self.checkpoint, {'boot_id': snapshot['boot_id'],
+                      'raw_usage': self.raw_usage, 'total_usage': self.total_usage})
         now = snapshot['collected_at']
         self.first_seen = {h['mac']: self.first_seen.get(h['mac'], now)
                            for h in snapshot['live_hosts']}
@@ -178,7 +209,8 @@ def main():
     if not MAC.fullmatch(config['mac']):
         raise ValueError('Invalid router MAC')
     try:
-        run(config, Path(args.state_dir), RouterObserver(),
+        checkpoint = Path(args.status_dir) / 'counters.json' if args.status_dir else None
+        run(config, Path(args.state_dir), RouterObserver(checkpoint),
             Path(args.status_dir) if args.status_dir else None)
     except CompatibilityError as exc:
         logging.error('Router reporter stopped; router configuration unaffected: %s', exc)

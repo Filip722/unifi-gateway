@@ -8,8 +8,11 @@ The original upstream gateway entry point and other features remain available.
 ## Data published
 
 * DHCP MAC/IP/name mappings from current leases.
-* Primary-LAN hosts that answer ping and match the neighbor-table MAC.
-* Per-host routed traffic bytes and packets from the existing `nlbwmon` database.
+* Hosts across configured local IPv4 networks that match the neighbor-table MAC
+  and either answer ping or have a freshly REACHABLE ARP entry. Stale entries
+  alone do not establish presence.
+* Per-host Internet traffic bytes and packets from the existing `nlbwmon` database.
+* Optional forwarded local IPv4 traffic counters, including traffic between VLANs.
 * WAN/LAN interface totals and rates from kernel counters.
 * Router CPU usage, memory use and actual router uptime.
 * A real Internet ICMP check and latency to `1.1.1.1` in the local status file.
@@ -29,7 +32,14 @@ a switch or inside a hypervisor bridge is outside that path. UniFi accumulates
 new observations; existing historical monthly data is not backfilled into UniFi's
 history. The full accounting-period data remains available in OpenWrt/LuCI.
 Counter decreases at an accounting reset are handled without negative rates or
-unsigned-counter spikes. No application-level DPI or physical switch-port
+unsigned-counter spikes. UniFi's client transmit fields represent download;
+nlbwmon uses the client's receive fields for download. Byte and packet directions
+are translated accordingly. UniFi derives client rates from successive totals.
+Internet and local counters are accumulated independently so a reset of one
+source does not replay the other. A RAM checkpoint in the publisher status
+directory preserves continuity across telemetry restarts without flash writes.
+New sources establish a baseline; their existing totals are not replayed.
+No application-level DPI or physical switch-port
 statistics are invented. Internet health in the local status file must not be
 confused with a complete native UniFi gateway health history.
 
@@ -45,6 +55,9 @@ OpenWrt cryptography backend, with cross-backend CBC/GCM tests.
 2. Create a locked account/group named `unifi-report`. Install the collector
    configuration from `conf/openwrt-snapshot.sample.json` at
    `/etc/unifi-telemetry-snapshot.json`. Match case-sensitive interface names.
+   Set `lan_interfaces` to all local logical networks and `wan_interfaces` to the
+   primary and fallback names in priority order. Each LAN gets a separate
+   `network_table`/`host_table`; VLAN suffixes are preserved on the emulated LAN.
 3. Install private deployment configurations at `/etc/unifi-reporters/clients.json`
    and `/etc/unifi-reporters/gateway.json`, based on the sample files. Both use
    `/tmp/unifi-telemetry/snapshot.json`; use the real LAN MAC for gateway identity
@@ -57,6 +70,36 @@ OpenWrt cryptography backend, with cross-backend CBC/GCM tests.
    `/etc/init.d/unifi-telemetry`. It requires `ujail`; a publisher fails closed if
    its jail cannot be created. Start it and adopt only the new emulated devices.
    Enable at boot after checking fresh reports in UniFi.
+
+### Routed traffic between local networks
+
+nlbwmon deliberately excludes connections whose two endpoints are local. For
+example, a camera streaming across a VLAN to a recorder has no nlbwmon entry.
+Native AP observations may cover the camera while the wired recorder still
+shows no traffic from the gateway.
+
+To measure these forwarded IPv4 flows, adapt
+`pkg/openwrt/unifi-local.sample.nft` to the actual LAN devices and subnets and
+install it as `/etc/nftables.d/90-unifi-local.nft`. It belongs inside the existing
+`inet fw4` table. Check the complete configuration with `fw4 check` before loading
+the snippet or restarting the firewall. Set `local_traffic` to `true` in the
+collector configuration only after the two sets exist. Preserve the snippet in
+`/etc/sysupgrade.conf` along with the existing reporter configuration.
+
+The rules only count already-forwarded local packets after the main filter
+chains. They add no allow, drop, NAT, or routing rules. Keep flow offloading
+disabled for complete forwarding-counter coverage. Firewall reloads recreate
+the counters; the observer handles their resets independently of nlbwmon.
+Counters are attributed only to verified IPv4 IP/MAC observations. A new IP/MAC
+pair establishes a fresh baseline so a previous address owner's traffic is not
+assigned to the new owner. Traffic staying on a switch, AP, or hypervisor bridge
+still requires native device statistics; IPv6-only discovery is not provided.
+
+When upgrading an already adopted deployment from the old direction mapping,
+preserve its last reported wire-counter offsets in the RAM checkpoint before
+resuming reports. Simply swapping large cumulative counters can pollute recent
+history. This does not repair historical upload/download labels. Do not publish
+deployment checkpoints or configurations.
 
 The collector updates a RAM snapshot every approximately 30 seconds. Publishers
 report every 30 seconds; probes and controller requests add a small delay.

@@ -1,0 +1,18 @@
+set unifi_local_rx {
+    type ipv4_addr
+    flags dynamic
+    size 1024
+    counter
+}
+
+set unifi_local_tx {
+    type ipv4_addr
+    flags dynamic
+    size 1024
+    counter
+}
+
+chain unifi_local_accounting {
+    type filter hook forward priority 10; policy accept;
+    iifname { "br-lan", "eth0.30", "eth0.40" } oifname { "br-lan", "eth0.30", "eth0.40" } ip saddr { 192.168.1.0/24, 192.168.30.0/24, 192.168.40.0/24 } ip daddr { 192.168.1.0/24, 192.168.30.0/24, 192.168.40.0/24 } add @unifi_local_tx { ip saddr counter } add @unifi_local_rx { ip daddr counter }
+}

@@ -19,10 +19,10 @@ def snapshot():
         'uptime': 100, 'cpu_total': 1000, 'cpu_idle': 900,
         'memory': {'available': 750, 'total': 1000},
         'interfaces': [
-            {'role': 'lan', 'addresses': [{'address': '192.0.2.1', 'mask': 24}],
+            {'role': 'lan', 'device': 'br-lan', 'addresses': [{'address': '192.0.2.1', 'mask': 24}],
              'mac': '00:11:22:33:44:55', 'up': True, 'counters': counters,
              'routes': [], 'dns': []},
-            {'role': 'wan', 'addresses': [{'address': '198.51.100.2', 'mask': 24}],
+            {'role': 'wan', 'device': 'eth1', 'addresses': [{'address': '198.51.100.2', 'mask': 24}],
              'mac': '00:11:22:33:44:56', 'up': True, 'counters': counters,
              'routes': [{'target': '0.0.0.0', 'mask': 0, 'nexthop': '198.51.100.1'}],
              'dns': ['198.51.100.1']},
@@ -70,7 +70,7 @@ def test_leases_do_not_become_live_hosts(config, snapshot):
     lan = next(n for n in data['network_table'] if n['name'] == 'eth1')
     assert len(data['ipv4_active_leases']) == 2
     assert [h['hostname'] for h in lan['host_table']] == ['live']
-    assert lan['host_table'][0]['rx_bytes'] == 123
+    assert lan['host_table'][0]['tx_bytes'] == 123
     assert data['system-stats']['mem'] == '25'
     assert 'cpu' not in data['system-stats']
 
@@ -111,7 +111,7 @@ def test_accounting_period_reset_does_not_make_negative_traffic(config, snapshot
     with patch('router_telemetry.read_snapshot', return_value=snapshot):
         data, _ = observer(config, {'adopted': True}, 0)
     host = data['network_table'][0]['host_table'][0]
-    assert host['rx_bytes'] == 128
+    assert host['tx_bytes'] == 5
 
 
 @pytest.mark.parametrize('change', ['old', 'schema', 'identity'])

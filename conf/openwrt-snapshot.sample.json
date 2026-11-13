@@ -1,4 +1,7 @@
 {
   "lan_interface": "lan",
-  "wan_interface": "wan"
+  "lan_interfaces": ["lan"],
+  "wan_interface": "wan",
+  "wan_interfaces": ["wan"],
+  "local_traffic": false
 }
