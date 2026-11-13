@@ -101,6 +101,55 @@ resuming reports. Simply swapping large cumulative counters can pollute recent
 history. This does not repair historical upload/download labels. Do not publish
 deployment checkpoints or configurations.
 
+### Per-device history in LuCI
+
+The optional collectd adapter reads the existing snapshot and exports measured
+download/upload rates separately for Internet and routed local traffic. It does
+not collect packets or require UniFi credentials. MAC addresses identify the
+history files; LuCI resolves device names and addresses when displaying them, so
+renaming a device does not split its history. Unknown accounting, new IP/MAC
+pairs, router reboots and gaps longer than 90 seconds produce missing samples
+instead of invented zero usage or counter spikes. Existing accounting totals
+are not backfilled into the timeline.
+
+1. Install `luci-app-statistics` and `collectd-mod-exec` with `apk`.
+2. Install `collectd_telemetry.py` beside the existing reporter modules under
+   `/usr/lib/unifi-reporter/`, owned by root and mode 0644.
+3. Install the files from `pkg/openwrt/luci/` as follows:
+   * `device_traffic.js` → `/www/luci-static/resources/statistics/rrdtool/definitions/device_traffic.js`
+   * `devices.js` → `/www/luci-static/resources/view/statistics/devices.js`
+   * `luci-device-traffic.json` → `/usr/share/luci/menu.d/luci-device-traffic.json`
+4. Enable `luci_statistics.collectd_exec` and add this UCI section to
+   `/etc/config/luci_statistics`:
+
+   ```uci
+   config collectd_exec_input 'device_traffic'
+       option cmduser 'nobody'
+       option cmdgroup 'unifi-report'
+       option cmdline '/usr/bin/python3 /usr/lib/unifi-reporter/collectd_telemetry.py'
+   ```
+
+5. Keep the RRD data in `/tmp/rrd`, set
+   `luci_statistics.collectd_rrdtool.CacheTimeout=30`, and enable native backups
+   with `luci_statistics.collectd_rrdtool.backup=1`. A cron entry such as
+   `15 */6 * * * /etc/init.d/luci_statistics backup` also saves history every six
+   hours. Native backups go to `/etc/luci_statistics/rrdbackup.tgz` and restore
+   when LuCI Statistics starts. An unexpected power loss can lose samples since
+   the last backup. The native backup briefly restarts collectd to flush RRDs.
+6. Validate generated configuration with `collectd -t -C <generated-config>`,
+   then enable and restart `/etc/init.d/luci_statistics`.
+7. Preserve the three custom LuCI files in `/etc/sysupgrade.conf`. The existing
+   reporter-directory preservation covers the Python adapter; LuCI Statistics
+   supplies its own history-backup hook for sysupgrade. Reinstall its packages
+   after an upgrade as necessary.
+
+Open **Statistics → Devices** at `/cgi-bin/luci/admin/statistics/devices`, select
+a device and period, and allow two fresh collector samples for the first rates.
+The page renders only the selected device and refreshes every 30 seconds. It
+requires the standard statistics and network-status read permissions. The Exec
+reader runs as `nobody` with the snapshot-reading group; the UniFi publishers
+retain their existing user and filesystem jails.
+
 The collector updates a RAM snapshot every approximately 30 seconds. Publishers
 report every 30 seconds; probes and controller requests add a small delay.
 Adoption metadata is persistent and written only when it changes. Frequently

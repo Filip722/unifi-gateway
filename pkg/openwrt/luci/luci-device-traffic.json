@@ -1,0 +1,13 @@
+{
+  "admin/statistics/devices": {
+    "title": "Devices",
+    "order": 5,
+    "action": {
+      "type": "view",
+      "path": "statistics/devices"
+    },
+    "depends": {
+      "acl": ["luci-app-statistics", "luci-base-network-status"]
+    }
+  }
+}
