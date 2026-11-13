@@ -1,0 +1,10 @@
+{
+  "luci-device-traffic": {
+    "description": "Read recorded per-device traffic samples",
+    "read": {
+      "file": {
+        "/usr/bin/rrdtool fetch /tmp/rrd/*/device_traffic-*/bytes-*.rrd AVERAGE -s *": ["exec"]
+      }
+    }
+  }
+}

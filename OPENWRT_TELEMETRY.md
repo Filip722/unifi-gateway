@@ -118,7 +118,10 @@ are not backfilled into the timeline.
 3. Install the files from `pkg/openwrt/luci/` as follows:
    * `device_traffic.js` → `/www/luci-static/resources/statistics/rrdtool/definitions/device_traffic.js`
    * `devices.js` → `/www/luci-static/resources/view/statistics/devices.js`
+   * `devices.css` → `/www/luci-static/resources/statistics/devices.css`
+   * The `uplot/` directory → `/www/luci-static/resources/statistics/uplot/`
    * `luci-device-traffic.json` → `/usr/share/luci/menu.d/luci-device-traffic.json`
+   * `luci-device-traffic-acl.json` → `/usr/share/rpcd/acl.d/luci-device-traffic.json`
 4. Enable `luci_statistics.collectd_exec` and add this UCI section to
    `/etc/config/luci_statistics`:
 
@@ -138,15 +141,23 @@ are not backfilled into the timeline.
    the last backup. The native backup briefly restarts collectd to flush RRDs.
 6. Validate generated configuration with `collectd -t -C <generated-config>`,
    then enable and restart `/etc/init.d/luci_statistics`.
-7. Preserve the three custom LuCI files in `/etc/sysupgrade.conf`. The existing
+7. Preserve the custom LuCI files and `uplot/` assets in `/etc/sysupgrade.conf`. The existing
    reporter-directory preservation covers the Python adapter; LuCI Statistics
    supplies its own history-backup hook for sysupgrade. Reinstall its packages
    after an upgrade as necessary.
 
 Open **Statistics → Devices** at `/cgi-bin/luci/admin/statistics/devices`, select
 a device and period, and allow two fresh collector samples for the first rates.
-The page renders only the selected device and refreshes every 30 seconds. It
-requires the standard statistics and network-status read permissions. The Exec
+The page renders only the selected device and refreshes every 30 seconds. Its
+interactive uPlot charts are served locally and read the existing RRD files;
+changing the renderer does not replace the history. Hovering shows sample values,
+rates use bit/s units, and unknown samples remain gaps. The bundled uPlot 1.6.32
+files retain their upstream MIT license. The standard Statistics → Graphs page
+still has the native PNG definition available.
+
+The Devices page requires statistics, network-status and `luci-device-traffic`
+read permissions. The added permission allows only per-device RRD fetch commands
+under `/tmp/rrd`; it provides no configuration writes. The Exec
 reader runs as `nobody` with the snapshot-reading group; the UniFi publishers
 retain their existing user and filesystem jails.
 

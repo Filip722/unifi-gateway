@@ -7,7 +7,7 @@
       "path": "statistics/devices"
     },
     "depends": {
-      "acl": ["luci-app-statistics", "luci-base-network-status"]
+      "acl": ["luci-app-statistics", "luci-base-network-status", "luci-device-traffic"]
     }
   }
 }
