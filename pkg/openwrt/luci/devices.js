@@ -33,11 +33,39 @@ return view.extend({
 		const points = [];
 		for (const line of text.split('\n')) {
 			const match = line.match(/^\s*(\d+):\s+(\S+)/);
-			if (!match || +match[1] < start || +match[1] > end) continue;
+			if (!match) continue;
 			const value = Number(match[2]);
 			points.push([+match[1], Number.isFinite(value) && value >= 0 ? value * 8 : null]);
 		}
-		return points;
+		// RRD timestamps mark the end of each averaged interval.
+		const interval = points.length > 1 ? points[1][0] - points[0][0] : 0;
+		let bytes = 0, seconds = 0;
+		for (const [time, value] of points) {
+			const overlap = Math.max(0, Math.min(end, time) - Math.max(start, time - interval));
+			if (value != null && overlap > 0) {
+				bytes += value / 8 * overlap;
+				seconds += overlap;
+			}
+		}
+		return { points: points.filter(p => p[0] >= start && p[0] <= end), bytes: seconds ? bytes : null, seconds: seconds };
+	},
+
+	historyWindows(start, end) {
+		const windows = [];
+		let right = end;
+		for (const [span] of periods) {
+			const left = Math.max(start, end - span);
+			if (left < right) windows.push([left, right]);
+			right = left;
+			if (left === start) break;
+		}
+		return windows.reverse();
+	},
+
+	formatBytes(value) {
+		if (value == null) return '—';
+		const unit = Math.min(4, Math.max(0, Math.floor(Math.log10(value || 1) / 3)));
+		return (value / Math.pow(1000, unit)).toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + ['B', 'kB', 'MB', 'GB', 'TB'][unit];
 	},
 
 	formatRate(value) {
@@ -71,27 +99,33 @@ return view.extend({
 		const cards = ['internet', 'local'].map(function(source) {
 			const download = E('strong', { class: 'traffic-download' }, '—');
 			const upload = E('strong', { class: 'traffic-upload' }, '—');
+			const totals = ['download', 'upload'].map(function(direction) {
+				return { value: E('strong', { class: 'traffic-' + direction }, '—'), coverage: E('small', {}, _('No stored intervals')) };
+			});
 			const stamp = E('span', {}, _('No recent measurement'));
 			const plot = E('div', { class: 'traffic-plot' });
 			const empty = E('div', { class: 'traffic-empty' }, _('No measured samples in this period'));
 			const card = E('section', { class: 'traffic-card' }, [
 				E('h3', {}, source === 'internet' ? _('Internet') : _('LAN / VLAN')),
 				E('p', { class: 'traffic-description' }, source === 'internet' ? _('Traffic to and from the Internet') : _('Routed traffic between local networks')),
+				E('div', { class: 'traffic-metrics traffic-totals' }, totals.map(function(total, index) {
+					return E('div', {}, [E('span', {}, index ? _('↑ Uploaded in period · estimated') : _('↓ Downloaded in period · estimated')), total.value, total.coverage]);
+				})),
 				E('div', { class: 'traffic-metrics' }, [
-					E('div', {}, [E('span', {}, _('↓ Download')), download]),
-					E('div', {}, [E('span', {}, _('↑ Upload')), upload])
+					E('div', {}, [E('span', {}, _('↓ Download rate')), download]),
+					E('div', {}, [E('span', {}, _('↑ Upload rate')), upload])
 				]),
 				E('div', { class: 'traffic-plot-wrap' }, [plot, empty]),
 				E('p', { class: 'traffic-sample' }, stamp)
 			]);
-			return { source: source, node: card, plot: plot, empty: empty, download: download, upload: upload, stamp: stamp, chart: null };
+			return { source: source, node: card, plot: plot, empty: empty, totals: totals, download: download, upload: upload, stamp: stamp, chart: null };
 		});
 		const showValues = function(card, chart, index) {
 			const hovering = index != null;
 			if (!hovering) {
 				index = chart.data[0].length - 1;
 				while (index >= 0 && chart.data[1][index] == null && chart.data[2][index] == null) index--;
-				const interval = chart.data[0][1] - chart.data[0][0] || 30;
+				const interval = chart.data[0][index] - chart.data[0][index - 1] || 30;
 				if (index >= 0 && bounds[1] - chart.data[0][index] > Math.max(90, interval * 2)) index = -1;
 			}
 			card.download.textContent = formatRate(chart.data[1][index]);
@@ -102,23 +136,34 @@ return view.extend({
 		const update = () => {
 			const selected = device.value, span = +period.value, sequence = ++request;
 			const end = Math.floor(Date.now() / 1000) - 15, start = end - span;
-			const resolution = Math.max(30, Math.ceil(span / 600 / 30) * 30);
+			const windows = this.historyWindows(start, end);
 			const item = devices.find(function(d) { return d.id === selected; });
 			identity.textContent = item.name + ' · ' + item.mac;
+			status.textContent = _('Loading history…');
+			cards.forEach(card => card.totals.forEach(function(total) {
+				total.value.textContent = '—';
+				total.coverage.textContent = _('Loading…');
+			}));
 			return Promise.all(cards.map(card => Promise.all(['download', 'upload'].map(direction => {
 				const path = rrdtool.opts.rrdpath + '/' + host + '/device_traffic-' + selected + '/bytes-' + card.source + '_' + direction + '.rrd';
-				return fs.exec_direct('/usr/bin/rrdtool', ['fetch', path, 'AVERAGE', '-s', start, '-e', end, '-r', resolution])
-					.then(text => this.parseSeries(text, start, end));
+				return Promise.all(windows.map(([left, right]) =>
+					fs.exec_direct('/usr/bin/rrdtool', ['fetch', path, 'AVERAGE', '-s', left, '-e', right, '-r', 30])
+						.then(text => this.parseSeries(text, left, right))));
 			})))).then(results => {
 				if (sequence !== request) return;
 				bounds = [start, end];
-				cards.forEach(function(card, index) {
+				cards.forEach((card, index) => {
 					const rows = new Map();
-					results[index].forEach(function(points, direction) {
-						points.forEach(function(point) {
+					results[index].forEach((bands, direction) => {
+						const seconds = bands.reduce((sum, band) => sum + band.seconds, 0);
+						const percent = seconds / span * 100;
+						card.totals[direction].value.textContent = this.formatBytes(seconds ? bands.reduce((sum, band) => sum + (band.bytes || 0), 0) : null);
+						card.totals[direction].coverage.textContent = seconds ? _('%s of period has stored intervals').format(
+							(percent < 0.01 ? '<0.01' : percent.toLocaleString(undefined, { maximumFractionDigits: 2 })) + '%') : _('No stored intervals');
+						bands.forEach(band => band.points.forEach(function(point) {
 							if (!rows.has(point[0])) rows.set(point[0], [null, null]);
 							rows.get(point[0])[direction] = point[1];
-						});
+						}));
 					});
 					const times = Array.from(rows.keys()).sort(function(a, b) { return a - b; });
 					const series = [times, times.map(t => rows.get(t)[0]), times.map(t => rows.get(t)[1])];
@@ -170,7 +215,7 @@ return view.extend({
 		]));
 		wrapper.appendChild(E('div', { class: 'traffic-meta' }, [identity, status]));
 		wrapper.appendChild(E('div', { class: 'traffic-cards' }, cards.map(c => c.node)));
-		wrapper.appendChild(E('p', { class: 'traffic-footnote' }, _('Hover a chart to inspect a sample. Gaps mean no measurement. Traffic staying within a switch, access point or bridge is outside these counters.')));
+		wrapper.appendChild(E('p', { class: 'traffic-footnote' }, _('Totals estimate recorded usage from stored average rates, excluding missing intervals. Older history is less detailed. Hover a chart to inspect a sample. Traffic staying within a switch, access point or bridge is outside these counters.')));
 		return wrapper;
 	},
 

@@ -24,6 +24,8 @@
 .traffic-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
 .traffic-metrics span { display: block; font-size: 12px; color: var(--traffic-muted); margin-bottom: 6px; }
 .traffic-metrics strong { display: block; font-size: clamp(18px, 2.1vw, 29px); letter-spacing: -.6px; font-weight: 600; }
+.traffic-totals { padding-bottom: 20px; border-bottom: 1px solid var(--traffic-border); }
+.traffic-totals small { display: block; color: var(--traffic-muted); font-size: 11px; margin-top: 6px; }
 .traffic-download { color: #3b82f6; }
 .traffic-upload { color: #a855f7; }
 .traffic-plot-wrap { position: relative; min-height: 260px; }

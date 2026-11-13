@@ -153,7 +153,15 @@ a device and period, and allow two fresh collector samples for the first rates.
 The page renders only the selected device and refreshes every 30 seconds. Its
 interactive uPlot charts are served locally and read the existing RRD files;
 changing the renderer does not replace the history. Hovering shows sample values,
-rates use bit/s units, and unknown samples remain gaps. The bundled uPlot 1.6.32
+rates use bit/s units, and unknown samples remain gaps. Each card also shows
+estimated downloaded/uploaded bytes for the selected period, with the percentage
+of that period covered by stored intervals. Totals integrate each known average
+rate over its interval, clipped to the requested bounds, and exclude unknown
+intervals. Recent and older history are fetched in non-overlapping windows so
+long periods retain the recent detailed tail. RRD consolidation can average
+across small gaps, so these are estimates rather than exact accounting totals;
+the coverage describes stored intervals, not exact collector uptime. History
+before collection started cannot be recovered. The bundled uPlot 1.6.32
 files retain their upstream MIT license. The standard Statistics → Graphs page
 still has the native PNG definition available.
 
